@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowDownRight, ArrowUpRight, CheckCircle2, Clock, Plus, Repeat, Scale, Shuffle } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CheckCircle2, Clock, FileUp, Plus, Repeat, Scale, Shuffle, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
@@ -25,13 +26,16 @@ export function TransactionsPage({ kind }: { kind?: Kind }) {
   const { data } = useFinance();
   const { open } = useTransactionActions();
   const initialStatus = params.get("status");
+  const uncategorizedParam = params.get("categoria") === "sem";
   const [filters, setFilters] = useState<TxFilters>(() =>
     defaultFilters({
       kind: kind ?? "all",
       status: initialStatus === "pending" || initialStatus === "paid" ? initialStatus : "all",
-      preset: initialStatus === "pending" ? "all" : "this_month",
+      preset: initialStatus === "pending" || uncategorizedParam ? "all" : "this_month",
+      categoryId: uncategorizedParam ? "none" : "all",
     }),
   );
+  const uncategorized = data.transactions.filter((t) => !t.category_id && (!kind || t.kind === kind)).length;
 
   const rows = useMemo(() => filterTransactions(data.transactions, filters), [data.transactions, filters]);
   const copy = COPY[kind ?? "all"];
@@ -57,16 +61,21 @@ export function TransactionsPage({ kind }: { kind?: Kind }) {
         title={copy.title}
         description={copy.description}
         actions={
-          kind ? (
-            <Button onClick={() => open({ kind })}>
-              <Plus /> {copy.button}
+          <>
+            <Button variant="outline" asChild>
+              <Link href="/importar"><FileUp /> Importar extrato</Link>
             </Button>
-          ) : (
-            <>
-              <Button variant="outline" onClick={() => open({ kind: "income" })}><Plus /> Receita</Button>
-              <Button onClick={() => open({ kind: "expense" })}><Plus /> Despesa</Button>
-            </>
-          )
+            {kind ? (
+              <Button onClick={() => open({ kind })}>
+                <Plus /> {copy.button}
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => open({ kind: "income" })}><Plus /> Receita</Button>
+                <Button onClick={() => open({ kind: "expense" })}><Plus /> Despesa</Button>
+              </>
+            )}
+          </>
         }
       />
 
@@ -96,6 +105,18 @@ export function TransactionsPage({ kind }: { kind?: Kind }) {
           </>
         )}
       </section>
+
+      {uncategorized > 0 && filters.categoryId !== "none" && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning/[0.07] px-4 py-3 text-sm">
+          <Tags className="size-4 shrink-0 text-warning" />
+          <span className="flex-1">
+            Você tem <b>{uncategorized}</b> lançamento(s) sem categoria. Selecione vários e defina a categoria de uma vez.
+          </span>
+          <Button size="sm" variant="outline" className="bg-card" onClick={() => setFilters({ ...filters, categoryId: "none", preset: "all" })}>
+            Ver e categorizar
+          </Button>
+        </div>
+      )}
 
       <TransactionFilters filters={filters} onChange={setFilters} showKind={!kind} kind={kind} />
       <TransactionsTable

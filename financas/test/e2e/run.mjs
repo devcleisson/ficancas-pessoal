@@ -5,7 +5,7 @@
 //   npm run build && npx next start -p 3000 &
 //   node test/e2e/run.mjs
 import puppeteer from "puppeteer-core";
-import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
@@ -440,6 +440,116 @@ await check("logout, senha incorreta e novo login", async () => {
   await page.waitForFunction(() => location.pathname === "/", { timeout: 10000 });
   await waitText("R$ 5.870,10");
 });
+
+// ---------------------------------------------------------------------------
+// Importação de extrato e edição
+// ---------------------------------------------------------------------------
+const ofxDate = (d) => iso(d).replace(/-/g, "");
+const OFX = `OFXHEADER:100
+DATA:OFXSGML
+CHARSET:1252
+
+<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>
+<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>${ofxDate(plus(-1))}<TRNAMT>-45.90<FITID>1<MEMO>Compra no debito - IFOOD *RESTAURANTE</STMTTRN>
+<STMTTRN><TRNTYPE>CREDIT<DTPOSTED>${ofxDate(plus(-2))}<TRNAMT>3000.00<FITID>2<MEMO>CREDITO SALARIO EMPRESA XYZ</STMTTRN>
+<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>${ofxDate(plus(-2))}<TRNAMT>-200.00<FITID>3<MEMO>PIX ENVIADO - JOAO DA SILVA</STMTTRN>
+<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>${ofxDate(plus(-1))}<TRNAMT>-23.40<FITID>4<MEMO>UBER *TRIP</STMTTRN>
+</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
+const CARD_CSV = `date,title,amount\n${iso(plus(-3))},Netflix.com,55.90\n${iso(plus(-2))},Mercadolivre*Loja,129.90\n${iso(plus(-1))},Pagamento recebido,-400.00\n`;
+const ofxPath = join(OUT, "extrato-teste.ofx");
+const csvPath = join(OUT, "fatura-cartao.csv");
+writeFileSync(ofxPath, Buffer.from(OFX, "latin1"));
+writeFileSync(csvPath, CARD_CSV);
+
+async function upload(path) {
+  const input = await page.waitForSelector('input[aria-label="Arquivo do extrato"]', { timeout: 8000 });
+  await input.uploadFile(path);
+}
+
+await check("importa extrato OFX com categorias sugeridas", async () => {
+  await go("/importar");
+  await waitText("Arraste o arquivo aqui");
+  await chooseOutside("Destino da importação", "Banco Teste");
+  await upload(ofxPath);
+  await waitText("4 lançamento(s) encontrados");
+  await waitText("Selecionados para importar");
+  const cat = (d) => page.$eval(`[aria-label="Categoria de ${d}"]`, (el) => el.textContent.trim());
+  assert((await cat("Compra no debito - IFOOD *RESTAURANTE")) === "Alimentação", "ifood");
+  assert((await cat("UBER *TRIP")) === "Transporte", "uber");
+  assert((await cat("CREDITO SALARIO EMPRESA XYZ")) === "Salário", "salário");
+  assert((await cat("PIX ENVIADO - JOAO DA SILVA")) === "Sem categoria", "pix");
+  await shot("19-importar-previa");
+  await clickButton("Importar 4 lançamento(s)");
+  await waitText("4 lançamento(s) importado(s)");
+  await waitText("1 ficaram sem categoria");
+  await shot("20-importar-concluido", false);
+});
+
+await check("reimportar o mesmo extrato não duplica", async () => {
+  await clickButton("Importar outro");
+  await chooseOutside("Destino da importação", "Banco Teste");
+  await upload(ofxPath);
+  await waitText("Já existentes (4)");
+  await waitText("Já importado");
+  const disabled = await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.innerText.includes("Importar 0"))?.disabled);
+  assert(disabled === true, "botão deveria estar desabilitado");
+  await clickButton("Cancelar");
+});
+
+await check("importa fatura CSV no cartão (inverte sinais e ignora pagamento)", async () => {
+  await go("/importar");
+  await chooseOutside("Destino da importação", "Cartão Cartão Teste");
+  await upload(csvPath);
+  await waitText("3 lançamento(s) encontrados");
+  await waitText("Pagamento/estorno");
+  const inverted = await page.$eval('[aria-label="Inverter entradas e saídas"]', (el) => el.getAttribute("data-state"));
+  assert(inverted === "checked", "deveria inverter automaticamente");
+  await waitText("Importar 2 lançamento(s)");
+  await clickButton("Importar 2 lançamento(s)");
+  await waitText("2 lançamento(s) importado(s)");
+  await go("/cartoes");
+  await waitText("Netflix.com");
+});
+
+await check("categoriza em lote os lançamentos sem categoria", async () => {
+  await go("/movimentacoes");
+  await waitText("lançamento(s) sem categoria");
+  await clickButton("Ver e categorizar");
+  await waitText("PIX ENVIADO - JOAO DA SILVA");
+  await page.click('[aria-label="Selecionar todos"]');
+  await waitText("selecionado(s)");
+  await shot("21-lote", false);
+  await chooseOutside("Definir categoria dos selecionados", "Moradia");
+  await waitText("Nenhum lançamento encontrado");
+  await go("/movimentacoes");
+  await waitNoText("lançamento(s) sem categoria");
+  await type('input[aria-label="Buscar"]', "joao");
+  await waitText("Moradia");
+});
+
+await check("editar clicando no lançamento (lista e painel)", async () => {
+  await go("/movimentacoes");
+  await page.evaluate(() => [...document.querySelectorAll("td")].find((td) => td.innerText.includes("UBER *TRIP"))?.click());
+  await page.waitForSelector("#tx-desc");
+  assert((await page.$eval("#tx-desc", (el) => el.value)) === "UBER *TRIP", "abriu o lançamento errado");
+  await type("#tx-desc", "Uber para o trabalho");
+  await clickButton("Salvar alterações", inDialog);
+  await dialogClosed();
+  await waitText("Uber para o trabalho");
+  await go("/");
+  await page.click('button[aria-label="Editar Uber para o trabalho"]');
+  await page.waitForSelector("#tx-desc");
+  await page.keyboard.press("Escape");
+  await dialogClosed();
+  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await go("/importar");
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  assert(!overflow, "rolagem horizontal no celular");
+  await go("/movimentacoes");
+  await shot("22-mobile-movimentacoes");
+  await page.setViewport({ width: 1440, height: 900 });
+});
+
 
 await check("outro usuário não vê os dados do primeiro", async () => {
   await page.click('button[aria-label="Conta do usuário"]');

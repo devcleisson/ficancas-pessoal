@@ -18,13 +18,15 @@ interface TransactionActions {
   edit: (t: Transaction) => void;
   remove: (t: Transaction) => Promise<void>;
   togglePaid: (t: Transaction) => Promise<void>;
+  /** Exclui vários lançamentos (com confirmação). Devolve true se excluiu. */
+  removeMany: (rows: Transaction[]) => Promise<boolean>;
 }
 
 const Ctx = createContext<TransactionActions | null>(null);
 
 /** Um único formulário de lançamento compartilhado por todas as telas. */
 export function TransactionActionsProvider({ children }: { children: ReactNode }) {
-  const { remove: removeRow, removeWhere, update } = useFinance();
+  const { data, remove: removeRow, removeWhere, removeMany: removeRows, update } = useFinance();
   const confirm = useConfirm();
   const [state, setState] = useState<OpenOptions & { open: boolean }>({ kind: "expense", open: false });
 
@@ -77,7 +79,31 @@ export function TransactionActionsProvider({ children }: { children: ReactNode }
     [update, edit],
   );
 
-  const value = useMemo(() => ({ open, edit, remove, togglePaid }), [open, edit, remove, togglePaid]);
+  const removeMany = useCallback(
+    async (rows: Transaction[]) => {
+      // Parcelas de uma compra são excluídas juntas.
+      const groups = new Set(rows.map((r) => r.installment_group).filter(Boolean));
+      const ids = new Set(rows.map((r) => r.id));
+      for (const t of data.transactions) if (t.installment_group && groups.has(t.installment_group)) ids.add(t.id);
+      const extra = ids.size - rows.length;
+      const ok = await confirm({
+        title: `Excluir ${ids.size} lançamento(s)?`,
+        description: `Esta ação não pode ser desfeita.${extra > 0 ? ` Inclui ${extra} parcela(s) das compras parceladas selecionadas.` : ""}`,
+      });
+      if (!ok) return false;
+      try {
+        await removeRows("transactions", [...ids]);
+        toast.success(`${ids.size} lançamento(s) excluído(s).`);
+        return true;
+      } catch (e) {
+        toast.error((e as Error).message);
+        return false;
+      }
+    },
+    [confirm, data.transactions, removeRows],
+  );
+
+  const value = useMemo(() => ({ open, edit, remove, togglePaid, removeMany }), [open, edit, remove, togglePaid, removeMany]);
 
   return (
     <Ctx.Provider value={value}>

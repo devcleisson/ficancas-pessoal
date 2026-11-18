@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Database, Download, FileJson, FileSpreadsheet, Loader2, Moon, Pencil, Plus, Sun, Trash2, Upload } from "lucide-react";
@@ -11,7 +12,6 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
 import { Field } from "@/components/field";
 import { ColorPicker } from "@/components/color-picker";
@@ -21,11 +21,11 @@ import { useFinance } from "@/lib/store/finance-store";
 import { usePreferences } from "@/lib/store/preferences";
 import { getSupabase } from "@/lib/supabase/client";
 import {
-  RESTORE_ORDER, TRANSACTION_CSV_HEADER, buildBackup, downloadFile, parseCSV, rowsToTransactions, toCSV, transactionsToRows, type ImportedRow,
+  RESTORE_ORDER, TRANSACTION_CSV_HEADER, buildBackup, downloadFile, toCSV, transactionsToRows,
 } from "@/lib/export";
 import { formatBRL, formatDate, todayISO } from "@/lib/format";
 import { validateCategory, type Errors } from "@/lib/validation";
-import type { Category, Kind, TableName, Transaction } from "@/lib/types";
+import type { Category, Kind, TableName } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
@@ -234,12 +234,8 @@ function CategoryForm({ category, kind, onClose }: { category: Category | null; 
 }
 
 function DataCard() {
-  const { data, insertMany, upsertMany, reload, user } = useFinance();
-  const csvInput = useRef<HTMLInputElement>(null);
+  const { data, upsertMany, reload, user } = useFinance();
   const jsonInput = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<ImportedRow[] | null>(null);
-  const [rawRows, setRawRows] = useState<string[][] | null>(null);
-  const [defaultAccount, setDefaultAccount] = useState<string>(data.accounts[0]?.id ?? "none");
   const [busy, setBusy] = useState(false);
 
   const stamp = todayISO();
@@ -253,36 +249,6 @@ function DataCard() {
     const txs = [...data.transactions].sort((a, b) => a.date.localeCompare(b.date));
     downloadFile(`movimentacoes_${stamp}.csv`, toCSV([TRANSACTION_CSV_HEADER, ...transactionsToRows(txs, data)]), "text/csv;charset=utf-8");
     toast.success("Movimentações exportadas.");
-  }
-
-  function downloadTemplate() {
-    downloadFile("modelo-importacao.csv", toCSV([
-      ["Data", "Tipo", "Descrição", "Valor", "Categoria", "Conta", "Forma de pagamento", "Status", "Observações"],
-      ["05/11/2026", "Receita", "Exemplo de receita", "1.000,00", "Salário", data.accounts[0]?.name ?? "Carteira", "Pix", "Recebida", ""],
-      ["06/11/2026", "Despesa", "Exemplo de despesa", "45,90", "Alimentação", data.accounts[0]?.name ?? "Carteira", "Pix", "Paga", "apague estas linhas de exemplo"],
-    ]), "text/csv;charset=utf-8");
-  }
-
-  async function onCSV(file: File) {
-    if (file.size > 5_000_000) return toast.error("Arquivo muito grande (máx. 5 MB).");
-    const rows = parseCSV(await file.text());
-    setRawRows(rows);
-    setPreview(rowsToTransactions(rows, data, defaultAccount === "none" ? null : defaultAccount));
-  }
-
-  async function confirmImport() {
-    const ok = (preview ?? []).filter((r) => r.value).map((r) => r.value!) as Partial<Transaction>[];
-    if (!ok.length) return;
-    setBusy(true);
-    try {
-      for (let i = 0; i < ok.length; i += 500) await insertMany("transactions", ok.slice(i, i + 500));
-      toast.success(`${ok.length} lançamento(s) importado(s).`);
-      setPreview(null);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function onJSON(file: File) {
@@ -328,8 +294,6 @@ function DataCard() {
     }
   }
 
-  const valid = preview?.filter((r) => r.value).length ?? 0;
-  const invalid = preview?.filter((r) => r.error) ?? [];
 
   return (
     <Card>
@@ -342,55 +306,12 @@ function DataCard() {
         </div>
         <div className="grid gap-3 rounded-xl border border-border p-4">
           <p className="flex items-center gap-2 text-sm font-medium"><Upload className="size-4" /> Importar</p>
-          <Button variant="outline" className="justify-start" onClick={() => csvInput.current?.click()}><FileSpreadsheet /> Movimentações de um CSV</Button>
+          <Button variant="outline" className="justify-start" asChild><Link href="/importar"><FileSpreadsheet /> Extrato do banco (OFX ou CSV)</Link></Button>
           <Button variant="outline" className="justify-start" disabled={busy} onClick={() => jsonInput.current?.click()}>{busy ? <Loader2 className="animate-spin" /> : <Database />} Restaurar backup (JSON)</Button>
-          <button type="button" onClick={downloadTemplate} className="justify-self-start text-xs text-muted-foreground underline-offset-4 hover:underline">Baixar modelo de CSV</button>
-          <input ref={csvInput} type="file" accept=".csv,text/csv" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onCSV(f); }} />
           <input ref={jsonInput} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onJSON(f); }} />
         </div>
       </CardContent>
 
-      <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Revisar importação</DialogTitle>
-            <DialogDescription>{valid} lançamento(s) prontos para importar{invalid.length ? ` · ${invalid.length} linha(s) com erro serão ignoradas` : ""}.</DialogDescription>
-          </DialogHeader>
-          <DialogBody className="grid gap-4">
-            <Field label="Conta padrão (quando a coluna Conta estiver vazia)">
-              <Select value={defaultAccount} onValueChange={(v) => { setDefaultAccount(v); if (rawRows) setPreview(rowsToTransactions(rawRows, data, v === "none" ? null : v)); }}>
-                <SelectTrigger aria-label="Conta padrão"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Nenhuma</SelectItem>
-                  {data.accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <div className="max-h-72 overflow-auto rounded-lg border border-border">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-card">
-                  <tr className="border-b border-border text-left text-muted-foreground"><th className="p-2">Linha</th><th className="p-2">Data</th><th className="p-2">Descrição</th><th className="p-2 text-right">Valor</th><th className="p-2">Situação</th></tr>
-                </thead>
-                <tbody>
-                  {preview?.map((r) => (
-                    <tr key={r.line} className="border-b border-border/50 last:border-0">
-                      <td className="p-2 text-muted-foreground">{r.line}</td>
-                      <td className="p-2">{r.value ? formatDate(r.value.date!) : "—"}</td>
-                      <td className="max-w-48 truncate p-2">{r.description ?? "—"}</td>
-                      <td className={cn("p-2 text-right tabular", r.value?.kind === "income" ? "text-income" : "text-expense")}>{r.value ? formatBRL(r.value.amount!) : "—"}</td>
-                      <td className="p-2">{r.error ? <span className="text-expense">{r.error}</span> : <span className="text-income">OK{!r.value?.category_id && " · sem categoria"}</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPreview(null)}>Cancelar</Button>
-            <Button disabled={!valid || busy} onClick={() => void confirmImport()}>{busy && <Loader2 className="animate-spin" />} Importar {valid} lançamento(s)</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }

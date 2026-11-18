@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 
 export default function DashboardPage() {
   const { data } = useFinance();
-  const { open } = useTransactionActions();
+  const { open, edit } = useTransactionActions();
   const today = todayISO();
   const [month, setMonth] = useState(monthKey(today));
 
@@ -233,16 +233,18 @@ export default function DashboardPage() {
                 {recent.map((t) => {
                   const cat = t.category_id ? catById.get(t.category_id) : undefined;
                   return (
-                    <li key={t.id} className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50">
-                      <CategoryIcon icon={cat?.icon ?? "circle"} color={cat?.color ?? "#71717a"} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{t.description}</p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {formatDateShort(t.date)} · {cat?.name ?? "Sem categoria"}
-                          {!t.card_id && t.status === "pending" && <span className="text-warning"> · pendente</span>}
-                        </p>
-                      </div>
-                      <Money value={t.kind === "income" ? t.amount : -t.amount} tone={t.kind === "income" ? "income" : "expense"} sign className="text-sm font-medium" />
+                    <li key={t.id}>
+                      <button type="button" onClick={() => edit(t)} aria-label={`Editar ${t.description}`} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/50">
+                        <CategoryIcon icon={cat?.icon ?? "circle"} color={cat?.color ?? "#71717a"} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{t.description}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {formatDateShort(t.date)} · {cat ? cat.name : <span className="text-warning">Sem categoria</span>}
+                            {!t.card_id && t.status === "pending" && <span className="text-warning"> · pendente</span>}
+                          </p>
+                        </div>
+                        <Money value={t.kind === "income" ? t.amount : -t.amount} tone={t.kind === "income" ? "income" : "expense"} sign className="text-sm font-medium" />
+                      </button>
                     </li>
                   );
                 })}

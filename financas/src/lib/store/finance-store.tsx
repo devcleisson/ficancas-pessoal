@@ -96,6 +96,10 @@ interface FinanceContextValue {
   remove: (table: TableName, id: string) => Promise<void>;
   /** Exclui todos os registros onde `column = value` (ex.: um grupo de parcelas). */
   removeWhere: (table: TableName, column: string, value: string) => Promise<void>;
+  /** Aplica o mesmo `patch` a vários registros de uma vez. */
+  updateMany: <T extends TableName>(table: T, ids: string[], patch: Partial<RowOf<T>>) => Promise<void>;
+  /** Exclui vários registros pelos ids. */
+  removeMany: (table: TableName, ids: string[]) => Promise<void>;
   upsertMany: <T extends TableName>(table: T, values: Partial<RowOf<T>>[]) => Promise<void>;
   updateProfile: (patch: Partial<Profile>) => Promise<void>;
 }
@@ -185,6 +189,32 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     [sb, patchState],
   );
 
+  const updateMany = useCallback(
+    async <T extends TableName>(table: T, ids: string[], patch: Partial<RowOf<T>>) => {
+      const updated: RowOf<T>[] = [];
+      for (let i = 0; i < ids.length; i += 100) {
+        const { data: rows, error: e } = await sb.from(table).update(patch as never).in("id", ids.slice(i, i + 100)).select();
+        if (e) throw new Error(friendlyError(e));
+        updated.push(...((rows ?? []).map(normalize) as RowOf<T>[]));
+      }
+      const byId = new Map(updated.map((r) => [(r as { id: string }).id, r]));
+      patchState(table, (cur) => cur.map((r) => byId.get((r as { id: string }).id) ?? r));
+    },
+    [sb, patchState],
+  );
+
+  const removeMany = useCallback(
+    async (table: TableName, ids: string[]) => {
+      for (let i = 0; i < ids.length; i += 100) {
+        const { error: e } = await sb.from(table).delete().in("id", ids.slice(i, i + 100));
+        if (e) throw new Error(friendlyError(e));
+      }
+      const gone = new Set(ids);
+      patchState(table, (cur) => cur.filter((r) => !gone.has((r as { id: string }).id)));
+    },
+    [sb, patchState],
+  );
+
   const removeWhere = useCallback(
     async (table: TableName, column: string, value: string) => {
       const { error: e } = await sb.from(table).delete().eq(column, value);
@@ -219,8 +249,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ data, user, status, error, reload, insert, insertMany, update, remove, removeWhere, upsertMany, updateProfile }),
-    [data, user, status, error, reload, insert, insertMany, update, remove, removeWhere, upsertMany, updateProfile],
+    () => ({ data, user, status, error, reload, insert, insertMany, update, updateMany, remove, removeMany, removeWhere, upsertMany, updateProfile }),
+    [data, user, status, error, reload, insert, insertMany, update, updateMany, remove, removeMany, removeWhere, upsertMany, updateProfile],
   );
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>;

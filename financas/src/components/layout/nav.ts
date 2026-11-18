@@ -1,5 +1,5 @@
 import {
-  ArrowLeftRight, BarChart3, CalendarDays, CreditCard, Landmark, LayoutDashboard, PieChart, Repeat, Settings, Target,
+  ArrowLeftRight, BarChart3, CalendarDays, CreditCard, FileUp, Landmark, LayoutDashboard, PieChart, Repeat, Settings, Target,
   TrendingDown, TrendingUp, type LucideIcon,
 } from "lucide-react";
 
@@ -15,6 +15,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/", label: "Visão geral", icon: LayoutDashboard },
       { href: "/movimentacoes", label: "Movimentações", icon: ArrowLeftRight },
+      { href: "/importar", label: "Importar extrato", icon: FileUp },
       { href: "/receitas", label: "Receitas", icon: TrendingUp },
       { href: "/despesas", label: "Despesas", icon: TrendingDown },
       { href: "/cartoes", label: "Cartões", icon: CreditCard },

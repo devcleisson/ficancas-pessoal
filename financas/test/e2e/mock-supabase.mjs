@@ -132,6 +132,11 @@ function buildWhere(params, args) {
     const op = v.slice(0, dot);
     const val = v.slice(dot + 1);
     if (op === "is" && val === "null") parts.push(`"${k}" is null`);
+    else if (op === "in") {
+      const list = val.replace(/^\(|\)$/g, "").split(",").map((x) => x.replace(/^"|"$/g, ""));
+      args.push(list);
+      parts.push(`"${k}"::text = any($${args.length}::text[])`);
+    }
     else if (OPS[op]) {
       args.push(val);
       parts.push(`"${k}"::text ${OPS[op]} $${args.length}`);

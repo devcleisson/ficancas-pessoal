@@ -45,7 +45,8 @@ Sem o `.env.local` preenchido, o app mostra uma página explicando a configuraç
 | Área | O que faz |
 |---|---|
 | **Visão geral** | Saldo total, receitas/despesas/resultado do mês, renda comprometida, total guardado, comparação com o mês anterior, gráficos (receitas × despesas, evolução do saldo, gastos por categoria, histórico de 12 meses), últimas movimentações e próximos vencimentos. |
-| **Receitas / Despesas / Movimentações** | Cadastro, edição, exclusão, marcar como pago/recebido, busca e filtros por período, categoria, forma de pagamento, status, fixa/variável e conta. |
+| **Receitas / Despesas / Movimentações** | Cadastro, edição (toque no lançamento), exclusão, marcar como pago/recebido, busca e filtros por período, categoria (inclusive "Sem categoria"), forma de pagamento, status, fixa/variável e conta. Seleção múltipla para definir categoria, marcar como pago ou excluir em lote. |
+| **Importar extrato** | Extrato da conta ou fatura do cartão em **OFX** ou **CSV** (detecção automática de colunas, UTF-8 ou Windows-1252). Sugere categorias por palavras-chave e pelo seu histórico, aplica a mesma categoria a lançamentos parecidos, reconhece lançamentos já existentes e permite revisar tudo antes de salvar. |
 | **Cartões** | Vários cartões, limite total e disponível (calculado), fatura atual com período de compras, histórico de faturas, status (aberta, fechada, paga, parcial, vencida), compras parceladas e pagamento de fatura (debitado de uma conta). |
 | **Contas** | Contas bancárias, poupança, investimentos e dinheiro em espécie; saldo calculado; transferências entre contas; arquivamento. |
 | **Orçamento** | Limite mensal por categoria, barras de progresso e alertas em 70%, 90% e ao ultrapassar. |

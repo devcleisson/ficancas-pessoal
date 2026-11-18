@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, CircleDashed, CreditCard, Filter, MoreHorizontal, Pencil, Repeat, Search, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { Check, CircleDashed, CreditCard, Filter, Loader2, MoreHorizontal, Pencil, Repeat, Search, Trash2, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,7 @@ export function filterTransactions(txs: Transaction[], f: TxFilters) {
     .filter((t) => {
       if (t.date < from || t.date > to) return false;
       if (f.kind !== "all" && t.kind !== f.kind) return false;
-      if (f.categoryId !== "all" && t.category_id !== f.categoryId) return false;
+      if (f.categoryId === "none" ? t.category_id != null : f.categoryId !== "all" && t.category_id !== f.categoryId) return false;
       if (f.method !== "all" && t.payment_method !== f.method) return false;
       if (f.status !== "all" && (t.card_id ? "paid" : t.status) !== f.status) return false;
       if (f.expenseType !== "all" && t.expense_type !== f.expenseType) return false;
@@ -136,7 +137,7 @@ export function TransactionFilters({
               options={[["all", "Receitas e despesas"], ["income", "Receitas"], ["expense", "Despesas"]]} />
           )}
           <FilterSelect label="Categoria" value={filters.categoryId} onChange={(v) => set("categoryId", v)}
-            options={[["all", "Todas as categorias"], ...categories.map((c) => [c.id, c.name] as [string, string])]} />
+            options={[["all", "Todas as categorias"], ["none", "Sem categoria"], ...categories.map((c) => [c.id, c.name] as [string, string])]} />
           <FilterSelect label="Forma de pagamento" value={filters.method} onChange={(v) => set("method", v as TxFilters["method"])}
             options={[["all", "Todas as formas"], ...(Object.entries(PAYMENT_METHOD_LABEL) as [string, string][])]} />
           <FilterSelect label="Status" value={filters.status} onChange={(v) => set("status", v as TxFilters["status"])}
@@ -180,10 +181,17 @@ const PAGE = 40;
 
 export function TransactionsTable({ transactions, emptyTitle, emptyAction }: { transactions: Transaction[]; emptyTitle?: string; emptyAction?: React.ReactNode }) {
   const { data } = useFinance();
+  const { edit } = useTransactionActions();
   const [limit, setLimit] = useState(PAGE);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const catById = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories]);
   const accById = useMemo(() => new Map(data.accounts.map((a) => [a.id, a])), [data.accounts]);
   const cardById = useMemo(() => new Map(data.cards.map((c) => [c.id, c])), [data.cards]);
+
+  // Mantém na seleção apenas lançamentos que continuam visíveis.
+  const visibleIds = useMemo(() => new Set(transactions.map((t) => t.id)), [transactions]);
+  const selectedRows = transactions.filter((t) => selected.has(t.id));
+  const effectiveSelected = new Set([...selected].filter((id) => visibleIds.has(id)));
 
   const totals = useMemo(() => {
     const inc = sumMoney(transactions.filter((t) => t.kind === "income").map((t) => t.amount));
@@ -200,77 +208,103 @@ export function TransactionsTable({ transactions, emptyTitle, emptyAction }: { t
   }
 
   const visible = transactions.slice(0, limit);
+  const allVisibleSelected = visible.every((t) => effectiveSelected.has(t.id));
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleAll = () =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (allVisibleSelected) visible.forEach((t) => n.delete(t.id));
+      else visible.forEach((t) => n.add(t.id));
+      return n;
+    });
 
   return (
     <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 text-xs text-muted-foreground">
-        <span>
-          {transactions.length} {transactions.length === 1 ? "lançamento" : "lançamentos"}
-        </span>
-        <span className="flex gap-4">
-          {totals.inc > 0 && (
-            <span>
-              Receitas <Money value={totals.inc} tone="income" className="font-medium" />
-            </span>
-          )}
-          {totals.exp > 0 && (
-            <span>
-              Despesas <Money value={totals.exp} tone="expense" className="font-medium" />
-            </span>
-          )}
-        </span>
-      </div>
+      {effectiveSelected.size > 0 ? (
+        <BulkBar rows={selectedRows} onDone={() => setSelected(new Set())} />
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 text-xs text-muted-foreground">
+          <span>
+            {transactions.length} {transactions.length === 1 ? "lançamento" : "lançamentos"}
+            <span className="hidden sm:inline"> · toque em um lançamento para editar</span>
+          </span>
+          <span className="flex gap-4">
+            {totals.inc > 0 && <span>Receitas <Money value={totals.inc} tone="income" className="font-medium" /></span>}
+            {totals.exp > 0 && <span>Despesas <Money value={totals.exp} tone="expense" className="font-medium" /></span>}
+          </span>
+        </div>
+      )}
 
       {/* Tabela (telas médias e grandes) */}
       <div className="hidden md:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2.5 font-medium">Data</th>
-              <th className="px-4 py-2.5 font-medium">Descrição</th>
-              <th className="px-4 py-2.5 font-medium">Categoria</th>
-              <th className="px-4 py-2.5 font-medium">Conta / forma</th>
-              <th className="px-4 py-2.5 font-medium">Status</th>
-              <th className="px-4 py-2.5 text-right font-medium">Valor</th>
-              <th className="w-10" />
+              <th className="w-10 py-2.5 pl-4">
+                <Checkbox checked={allVisibleSelected} onChange={toggleAll} label="Selecionar todos" />
+              </th>
+              <th className="px-3 py-2.5 font-medium">Data</th>
+              <th className="px-3 py-2.5 font-medium">Descrição</th>
+              <th className="px-3 py-2.5 font-medium">Categoria</th>
+              <th className="px-3 py-2.5 font-medium">Conta / forma</th>
+              <th className="px-3 py-2.5 font-medium">Status</th>
+              <th className="px-3 py-2.5 text-right font-medium">Valor</th>
+              <th className="w-20" />
             </tr>
           </thead>
           <tbody>
             {visible.map((t) => {
               const cat = t.category_id ? catById.get(t.category_id) : undefined;
               const where = t.card_id ? cardById.get(t.card_id)?.name : t.account_id ? accById.get(t.account_id)?.name : undefined;
+              const isSel = effectiveSelected.has(t.id);
               return (
-                <tr key={t.id} className="group border-b border-border/60 last:border-0 hover:bg-muted/40">
-                  <td className="px-4 py-3 whitespace-nowrap text-muted-foreground tabular">{formatDate(t.date)}</td>
-                  <td className="max-w-72 px-4 py-3">
+                <tr
+                  key={t.id}
+                  onClick={() => edit(t)}
+                  className={cn("group cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/40", isSel && "bg-primary/[0.06]")}
+                >
+                  <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox checked={isSel} onChange={() => toggle(t.id)} label={`Selecionar ${t.description}`} />
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-muted-foreground tabular">{formatDate(t.date)}</td>
+                  <td className="max-w-72 px-3 py-3">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium">{t.description}</span>
                       <TxBadges t={t} />
                     </div>
                     {(t.notes || t.source) && <p className="truncate text-xs text-muted-foreground">{[t.source, t.notes].filter(Boolean).join(" · ")}</p>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     {cat ? (
                       <span className="flex items-center gap-2">
                         <CategoryIcon icon={cat.icon} color={cat.color} size="sm" />
                         <span className="truncate">{cat.name}</span>
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">Sem categoria</span>
+                      <Badge variant="warning">Sem categoria</Badge>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">
+                  <td className="px-3 py-3 text-muted-foreground">
                     <div className="truncate">{where ?? "—"}</div>
                     <div className="text-xs">{PAYMENT_METHOD_LABEL[t.payment_method]}</div>
                   </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge t={t} />
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium">
+                  <td className="px-3 py-3"><StatusBadge t={t} /></td>
+                  <td className="px-3 py-3 text-right font-medium">
                     <Money value={t.kind === "income" ? t.amount : -t.amount} tone={t.kind === "income" ? "income" : "expense"} sign />
                   </td>
-                  <td className="px-2 py-3">
-                    <RowMenu t={t} />
+                  <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex justify-end">
+                      <Button variant="ghost" size="icon-sm" aria-label={`Editar ${t.description}`} onClick={() => edit(t)} className="text-muted-foreground">
+                        <Pencil />
+                      </Button>
+                      <RowMenu t={t} />
+                    </div>
                   </td>
                 </tr>
               );
@@ -283,20 +317,24 @@ export function TransactionsTable({ transactions, emptyTitle, emptyAction }: { t
       <ul className="divide-y divide-border/60 md:hidden">
         {visible.map((t) => {
           const cat = t.category_id ? catById.get(t.category_id) : undefined;
+          const isSel = effectiveSelected.has(t.id);
           return (
-            <li key={t.id} className="flex items-center gap-3 px-4 py-3">
-              <CategoryIcon icon={cat?.icon ?? "circle"} color={cat?.color ?? "#71717a"} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="truncate text-sm font-medium">{t.description}</p>
-                  <TxBadges t={t} />
+            <li key={t.id} className={cn("flex items-center gap-2 py-2 pr-2 pl-3", isSel && "bg-primary/[0.06]")}>
+              <Checkbox checked={isSel} onChange={() => toggle(t.id)} label={`Selecionar ${t.description}`} />
+              <button type="button" onClick={() => edit(t)} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-1 text-left active:bg-muted/60" aria-label={`Editar ${t.description}`}>
+                <CategoryIcon icon={cat?.icon ?? "circle"} color={cat?.color ?? "#71717a"} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-sm font-medium">{t.description}</p>
+                    <TxBadges t={t} />
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {formatDateShort(t.date)} · {cat ? cat.name : <span className="text-warning">Sem categoria</span>}
+                    {!t.card_id && t.status === "pending" && <span className="text-warning"> · pendente</span>}
+                  </p>
                 </div>
-                <p className="truncate text-xs text-muted-foreground">
-                  {formatDateShort(t.date)} · {cat?.name ?? "Sem categoria"}
-                  {!t.card_id && t.status === "pending" && <span className="text-warning"> · pendente</span>}
-                </p>
-              </div>
-              <Money value={t.kind === "income" ? t.amount : -t.amount} tone={t.kind === "income" ? "income" : "expense"} sign className="text-sm font-medium" />
+                <Money value={t.kind === "income" ? t.amount : -t.amount} tone={t.kind === "income" ? "income" : "expense"} sign className="text-sm font-medium" />
+              </button>
               <RowMenu t={t} />
             </li>
           );
@@ -311,6 +349,105 @@ export function TransactionsTable({ transactions, emptyTitle, emptyAction }: { t
         </div>
       )}
     </Card>
+  );
+}
+
+function Checkbox({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange();
+      }}
+      className={cn(
+        "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+        checked ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-foreground/40",
+      )}
+    >
+      {checked && <Check className="size-3.5" />}
+    </button>
+  );
+}
+
+/** Ações em lote para os lançamentos selecionados. */
+function BulkBar({ rows, onDone }: { rows: Transaction[]; onDone: () => void }) {
+  const { data, updateMany } = useFinance();
+  const { removeMany } = useTransactionActions();
+  const [busy, setBusy] = useState(false);
+  const kinds = new Set(rows.map((r) => r.kind));
+  const kind: Kind | null = kinds.size === 1 ? [...kinds][0] : null;
+  const categories = data.categories.filter((c) => !kind || c.kind === kind).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const pending = rows.filter((r) => !r.card_id && r.status === "pending");
+  const payable = pending.filter((r) => r.account_id);
+
+  async function setCategory(categoryId: string) {
+    const cat = data.categories.find((c) => c.id === categoryId);
+    if (!cat) return;
+    const target = rows.filter((r) => r.kind === cat.kind);
+    setBusy(true);
+    try {
+      await updateMany("transactions", target.map((r) => r.id), { category_id: categoryId });
+      const skipped = rows.length - target.length;
+      toast.success(`Categoria "${cat.name}" aplicada a ${target.length} lançamento(s).${skipped ? ` ${skipped} ignorado(s) por serem ${cat.kind === "income" ? "despesas" : "receitas"}.` : ""}`);
+      onDone();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markPaid() {
+    setBusy(true);
+    try {
+      await updateMany("transactions", payable.map((r) => r.id), { status: "paid" });
+      const missing = pending.length - payable.length;
+      toast.success(`${payable.length} lançamento(s) marcados como pagos/recebidos.${missing ? ` ${missing} sem conta precisam ser editados.` : ""}`);
+      onDone();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-primary/30 bg-primary/[0.07] px-4 py-2.5">
+      <span className="text-sm font-medium">{rows.length} selecionado(s)</span>
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        <Select onValueChange={(v) => void setCategory(v)} disabled={busy} value="">
+          <SelectTrigger className="h-8 w-48 bg-card" aria-label="Definir categoria dos selecionados">
+            <SelectValue placeholder="Definir categoria…" />
+          </SelectTrigger>
+          <SelectContent>
+            {categories.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                <span className="flex items-center gap-2">
+                  <CategoryIcon icon={c.icon} color={c.color} size="sm" className="size-5 rounded-md [&_svg]:size-3" />
+                  {c.name}
+                  {!kind && <span className="text-xs text-muted-foreground">({c.kind === "income" ? "receita" : "despesa"})</span>}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {pending.length > 0 && (
+          <Button size="sm" variant="outline" className="bg-card" disabled={busy || payable.length === 0} onClick={() => void markPaid()}>
+            <Check /> Marcar como pago
+          </Button>
+        )}
+        <Button size="sm" variant="outline" className="bg-card text-expense" disabled={busy} onClick={() => void removeMany(rows).then((ok) => ok && onDone())}>
+          {busy ? <Loader2 className="animate-spin" /> : <Trash2 />} Excluir
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone} aria-label="Limpar seleção">
+          <X />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -339,11 +476,11 @@ function RowMenu({ t }: { t: Transaction }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={`Ações de ${t.description}`} className={cn("text-muted-foreground")}>
+        <Button variant="ghost" size="icon-sm" aria-label={`Ações de ${t.description}`} className="text-muted-foreground" onClick={(e) => e.stopPropagation()}>
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem onSelect={() => edit(t)}>
           <Pencil /> Editar
         </DropdownMenuItem>
